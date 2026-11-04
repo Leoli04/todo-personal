@@ -20,7 +20,7 @@ const LS = {
 
 const DEFAULT_CFG = {
   owner: '', repo: '', branch: 'main', path: 'todo.md',
-  interval: 120000, autoPush: false, theme: 'auto',
+  autoPush: false, theme: 'auto',
 };
 
 /* --------------------------------------------------------------- state */
@@ -78,8 +78,6 @@ function urlCfgFrom(search, hash) {
   if (br) out.branch = br;
   const pa = (p.get('path') || '').trim();
   if (pa) out.path = pa;
-  const iv = Number(p.get('interval'));
-  if (Number.isFinite(iv) && iv >= 30000) out.interval = iv;
   return out;
 }
 
@@ -217,9 +215,11 @@ function visibleTasks() {
 
 let client = null;
 let engine = null;
+let engineSeq = 0;
 
 function rebuildEngine() {
-  if (engine) engine.stop();
+  // 换配置时旧请求可能还在飞：用序号作废它的回调，避免旧仓库的响应盖到新配置上
+  const seq = ++engineSeq;
   engine = null;
   client = null;
   if (!configured()) return;
@@ -230,9 +230,9 @@ function rebuildEngine() {
   engine = createSyncEngine({
     client,
     getToken: loadToken,
-    intervalMs: S.cfg.interval,
-    onStatus: (st) => { S.sync = st; render(); },
+    onStatus: (st) => { if (seq !== engineSeq) return; S.sync = st; render(); },
     onData: (content) => {
+      if (seq !== engineSeq) return;
       if (content === S.remoteSrc) {
         if (!dirty()) { S.workSrc = content; setDoc(content); }
         return;
@@ -251,7 +251,7 @@ function rebuildEngine() {
       }
     },
   });
-  engine.start();
+  engine.load();
 }
 
 async function pushNow() {
@@ -300,7 +300,9 @@ async function pushNow() {
             S.workSrc = merged.src;
             setDoc(merged.src);
             persist();
-            engine?.markPushed(res2.sha);
+            // 写回后强制下一次刷新取全文：PUT 返回的是 commit sha，不是 blob 的 ETag，不能拿来当校验值
+            engine?.markPushed();
+            engine?.resetEtag();
             toast(merged.conflicts.length ? `已推送，${merged.conflicts.length} 处冲突保留本地版本` : '已推送到 GitHub', 'ok');
             return;
           }
@@ -314,7 +316,7 @@ async function pushNow() {
     S.remoteNewer = false;
     setDoc(target);
     persist();
-    engine?.markPushed(res.sha);
+    engine?.markPushed();
     engine?.resetEtag();
     toast(mergeInfo?.conflicts.length
       ? `已推送，${mergeInfo.conflicts.length} 处冲突保留本地版本`
@@ -353,13 +355,13 @@ function chipStatus() {
   const st = S.sync || {};
   const phase = st.phase || 'idle'; // 同步引擎未启动时 phase 为空，不能落到默认文案
   const map = {
-    ok: ['ok', '已同步'],
+    ok: ['ok', '已刷新'],
     'not-modified': ['ok', '无变化'],
-    syncing: ['busy', '同步中'],
+    syncing: ['busy', '刷新中'],
     offline: ['warn', '离线'],
-    error: ['err', st.error || '同步失败'],
+    error: ['err', st.error || '刷新失败'],
     ratelimited: ['warn', '配额受限'],
-    idle: ['idle', configured() ? '待同步' : '演示模式'],
+    idle: ['idle', configured() ? '待刷新' : '演示模式'],
   };
   const [kind, label] = map[phase] || ['idle', '未知'];
   return `<span class="dot dot--${kind}"></span><span class="chip-label">${esc(label)}</span>`;
@@ -503,7 +505,6 @@ function drawerHTML() {
   if (!S.drawer) return '';
   const c = S.cfg;
   const hasToken = !!loadToken();
-  const ivs = [[60000, '1 分钟'], [120000, '2 分钟'], [300000, '5 分钟'], [900000, '15 分钟']];
   return `
   <div class="drawer-mask" data-act="drawer-close"></div>
   <aside class="drawer" role="dialog" aria-label="设置">
@@ -520,11 +521,6 @@ function drawerHTML() {
       <label class="field"><span>分支</span><input id="cfg-branch" value="${esc(c.branch)}" /></label>
       <label class="field"><span>文件路径</span><input id="cfg-path" value="${esc(c.path)}" /></label>
     </div>
-    <label class="field"><span>同步间隔</span>
-      <select id="cfg-interval">
-        ${ivs.map(([v, l]) => `<option value="${v}" ${c.interval === v ? 'selected' : ''}>${l}</option>`).join('')}
-      </select>
-    </label>
     <label class="field"><span>Personal Access Token ${hasToken ? '<em class="ok-mark">已保存</em>' : ''}</span>
       <input id="cfg-token" type="password" placeholder="github_pat_… （仅存本机）" value="" />
     </label>
@@ -539,15 +535,18 @@ function drawerHTML() {
 
     <div class="drawer-actions">
       <button class="btn-ghost" data-act="probe">测试连接</button>
-      <button class="btn-primary" data-act="save-cfg">保存并同步</button>
+      <button class="btn-primary" data-act="save-cfg">保存并刷新</button>
     </div>
     <div class="drawer-foot">
       <div class="foot-links">
         <button class="link" data-act="copy-link">复制带配置的链接</button>
         <button class="link" data-act="reset-local">清空本地缓存</button>
       </div>
-      <span class="ver">v1.1</span>
+      <span class="ver">v1.2</span>
     </div>
+    <p class="hint hint--foot">
+      不做后台轮询：在 GitHub 上改完 todo.md、等 Actions 部署完，点顶栏的刷新按钮取一次最新内容。
+    </p>
     <p class="hint hint--foot">
       链接只带仓库坐标，不含 token。换电脑/换浏览器打开它即自动连上，token 需在新设备单独填一次
       （凭据不跟着链接走，这是有意的）。
@@ -607,7 +606,7 @@ function render() {
         <button class="icon-btn" data-act="theme" aria-label="主题：${themeLabel()}" title="主题：${themeLabel()}（点击切换）">
           ${themeIcon()}
         </button>
-        <button class="icon-btn" data-act="sync" aria-label="立即同步" title="立即同步">
+        <button class="icon-btn" data-act="sync" aria-label="刷新" title="刷新（从 GitHub 拉取最新内容）">
           <svg viewBox="0 0 16 16" class="${st.phase === 'syncing' ? 'spin' : ''}"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5V5H11"/></svg>
         </button>
         <button class="icon-btn" data-act="drawer" aria-label="设置" title="设置">
@@ -731,10 +730,14 @@ document.addEventListener('click', async (e) => {
       S.filters.tags = [];
       render();
       break;
-    case 'sync':
+    case 'sync': {
       if (!engine) { toast('先连接仓库', 'warn'); S.drawer = true; render(); return; }
-      await engine.syncNow();
+      const r = await engine.refresh();
+      if (r?.skipped) toast('正在刷新，请稍候', 'info', 1500);
+      else if (r?.status === 304) toast('已是最新内容', 'info', 1800);
+      else if (r?.status === 200) toast('已取到最新内容', 'ok', 1800);
       break;
+    }
     case 'push':
       await pushNow();
       break;
@@ -763,7 +766,6 @@ document.addEventListener('click', async (e) => {
       S.cfg.repo = $('#cfg-repo').value.trim();
       S.cfg.branch = $('#cfg-branch').value.trim() || 'main';
       S.cfg.path = $('#cfg-path').value.trim() || 'todo.md';
-      S.cfg.interval = Number($('#cfg-interval').value) || 120000;
       S.cfg.autoPush = $('#cfg-autopush').checked;
       const tk = $('#cfg-token').value.trim();
       if (tk) saveToken(tk);
@@ -771,7 +773,7 @@ document.addEventListener('click', async (e) => {
       S.drawer = false;
       rebuildEngine();
       render();
-      toast(configured() ? '已连接，正在同步…' : '请填写 owner 与 repo', configured() ? 'ok' : 'warn');
+      toast(configured() ? '已连接，正在拉取最新内容…' : '请填写 owner 与 repo', configured() ? 'ok' : 'warn');
       break;
     }
     case 'probe': {

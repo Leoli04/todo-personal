@@ -269,6 +269,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       footH: fr && Math.round(fr.height), linkCount: links.length,
       footOverflow: overflowLinks,
       footText: foot ? foot.textContent.replace(/\\s+/g, ' ').trim() : '',
+      // 轮询已移除：抽屉里不该再有「同步间隔」，配置里也不该有 interval
+      hasIntervalField: [...document.querySelectorAll('.drawer label span')].some(s => /同步间隔/.test(s.textContent)),
+      cfgKeys: Object.keys(window.__todo.S.cfg).sort().join(','),
+      syncKeys: Object.keys(window.__todo.S.sync || {}).sort().join(','),
+      refreshLabel: document.querySelector('[data-act="sync"]')?.getAttribute('aria-label') || '',
     };
   })()`);
   await sleep(260);
@@ -277,6 +282,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   fs.writeFileSync(path.join(OUT, 'todo-drawer.png'), Buffer.from(shotDrawer.data, 'base64'));
   await ev(`document.querySelector('[data-act="drawer-close"]').click()`);
   await sleep(120);
+
+  // —— 7.2 刷新按钮：演示模式下点它应给出提示，不该报错/不该自己开抽屉乱窜
+  report.refresh = await ev(`(() => {
+    const before = (window.__todo.S.sync || {}).phase || '';
+    document.querySelector('[data-act="sync"]').click();
+    const toastEl = document.querySelector('.toast');
+    const out = {
+      before,
+      toast: toastEl ? toastEl.textContent.trim() : '',
+      drawerOpened: !!document.querySelector('.drawer'),
+    };
+    document.querySelector('[data-act="drawer-close"]')?.click();
+    return out;
+  })()`);
+  await sleep(200);
 
   // —— 7.5 主题三态：auto → light → dark → auto，且两处浅色变量必须一致
   report.theme = await ev(`(() => {
@@ -442,6 +462,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('看板：分列渲染', R.board.cols >= 2 && R.board.perCol.some((n) => n > 0), R.board);
   check('抽屉：两个链接一行放下',
     R.drawer.open === true && R.drawer.linkCount === 2 && R.drawer.footOverflow === 0, R.drawer);
+  check('抽屉：已无「同步间隔」字段',
+    R.drawer.hasIntervalField === false && !R.drawer.fields.includes('cfg-interval'), R.drawer.fields);
+  check('配置项：不再持久化 interval',
+    R.drawer.cfgKeys === 'autoPush,branch,owner,path,repo,theme', R.drawer.cfgKeys);
+  check('状态：不再暴露轮询相关字段（interval/nextAt）',
+    !/interval|nextAt/.test(R.drawer.syncKeys), R.drawer.syncKeys);
+  check('按钮语义：是「刷新」不是「同步」',
+    R.drawer.refreshLabel === '刷新', R.drawer.refreshLabel);
+  check('刷新：未配置仓库时给提示、不抛错',
+    /先连接仓库/.test(R.refresh.toast), R.refresh);
   check('删除：数据源同步移除', R.remove.gone === true && R.remove.after === R.remove.before - 1, R.remove);
   check('持久化：草稿与基线都落本地', R.persist.work === true && R.persist.base === true, R.persist);
   check('主题：三态循环 auto→light→dark→auto',

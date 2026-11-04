@@ -1,46 +1,44 @@
 # Markdown-on-GitHub 个人 Todo 工具 · 设计方案
 
-> 结论先行：**推荐「单文件页面 + GitHub Contents API 直连 + 本地草稿队列」三层结构**。
+> 结论先行：**单文件页面 + GitHub Contents API 直连 + 本地草稿队列**三层结构。
 > 公开仓库可以零凭证只读；需要页面内写回时用 fine-grained PAT，只保存在本机。
-> 同步延迟不是「实时」而是**可量化的 60s / 300s 两档**，取决于走哪条通道——这一点必须先讲清楚，
-> 否则后面所有实现选择都站不住。
+> 取数**不做后台轮询**：打开页面拉一次，之后点刷新拉一次。理由见第 1 节 —— 这是本方案
+> 与「实时同步」路线的分界线。
 
 ---
 
-## 1. 为什么要先谈同步延迟
+## 1. 结论：不做轮询，按需刷新
 
-「GitHub 上改了，页面自动更新」这句话背后有三个物理约束，任何一个都绕不过：
+「页面要能看到 GitHub 上的最新内容」有两种做法，差别不在技术而在语义：
 
-1. `api.github.com` 未认证只有 **60 次/小时/IP**，且**未认证的 304 响应仍然计费**；
-2. `raw.githubusercontent.com` 走 Fastly CDN，`Cache-Control: max-age=300`，
-   在 TTL 内**即使源站已更新也只回 304**，最多 5 分钟盲区；
-3. GitHub Actions 的 cron **最小间隔 5 分钟**，且高峰期会排队，实际常 8~15 分钟。
+| 做法 | 语义 | 代价 |
+|---|---|---|
+| 轮询（定时器） | 让页面**保持**最新 | 持续请求、退避策略、可见性判断、配额自适应；后台偷偷覆盖本地草稿的风险 |
+| 按需刷新（按钮） | 让页面**拿到**最新 | 一次请求，只在用户要的时候发生 |
 
-以下是我在 2026-11-04 对真实端点做的实测（不是文档摘抄）：
+真实使用节奏是：在 GitHub 或手机 App 上改 `todo.md` → push 触发 Actions → Pages 重新部署 →
+回页面看一眼。这段链路本身就有分钟级间隔，页面「自动保持最新」的收益远小于它的复杂度，
+而复杂度是实打实的 bug 面：定时器、指数退避、页面隐藏停表、配额自适应、多标签页互相覆盖。
+
+真正决定「能不能做到实时」的是三个物理约束（2026-11-04 对真实端点实测，不是文档摘抄）：
 
 | 验证项 | 实测结果 | 对设计的影响 |
 |---|---|---|
 | `api.github.com` 的 CORS | `Access-Control-Allow-Origin: *` | 浏览器可直连 |
-| `PUT` 预检 | `204`，`allow-methods: GET, POST, PATCH, PUT, DELETE`，`allow-headers` 含 `Authorization` | **页面内写回可行** |
-| 未认证配额 | `X-RateLimit-Limit: 60` | 轮询最快 60s/次，且会被写回抢走配额 |
+| `PUT` 预检 | `204`，`allow-methods` 含 PUT/DELETE，`allow-headers` 含 `Authorization` | **页面内写回可行**，不需要中转服务 |
+| 未认证配额 | `X-RateLimit-Limit: 60`（每小时每 IP） | 轮询最快 60s/次，且会被写回抢走配额 |
 | 未认证 304 | `remaining` 57 → 55（照扣） | 「ETag 省配额」只在带 token 时成立 |
-| API 响应缓存 | `Cache-Control: public, max-age=60` | 必须自己带 `If-None-Match` + `cache:'no-store'` |
-| raw 响应缓存 | `Cache-Control: max-age=300`，`X-Cache: HIT`，`Source-Age: 261` | 高频轮询毫无意义 |
-| raw 的 CORS | `Access-Control-Allow-Origin: *` | 可作零配额探测通道 |
-| raw media type | 5847 B（纯文本）vs 8881 B（base64 JSON），ETag 相同 | 只读场景走 raw，省 34% 流量且免 base64 解码 |
-| `Access-Control-Expose-Headers` | 含 `ETag`、`X-RateLimit-*`、`Retry-After` | 前端能读到配额与 ETag，可做自适应退避 |
+| API 响应缓存 | `Cache-Control: public, max-age=60` | 必须自己带 `If-None-Match` 且 `cache:'no-store'` |
+| raw 响应缓存 | `max-age=300`，`X-Cache: HIT`，`Source-Age: 261` | 高频轮询毫无意义 |
+| raw media type | 5847 B（纯文本）vs 8881 B（base64 JSON），ETag 相同 | 只读走 raw 省 34% 流量 |
+| Actions cron | 最小 5 分钟，高峰排队 8~15 分钟 | 「定时快照」路线不可能比手动刷新更快 |
 
-由此得到延迟下限，**选方案就是选这一列**：
+所以这里取「按需刷新」：**一次点击 = 一次条件请求**。内容没变回 304（带 token 时不计配额），
+变了回 200。未认证 60 次/小时意味着「点刷新」这件事一分钟点一次都不会被限流，
+而人的实际操作频率是每天几次。
 
-| 通道 | 配额成本 | 第一个能看到新内容的时刻 |
-|---|---|---|
-| raw CDN 轮询 | 0 | 0 ~ 300 s（不可控） |
-| API 未认证轮询 | 60/h，建议 ≥120 s 一次 | 60 ~ 120 s |
-| API + PAT 轮询 | 5000/h，304 免费 | 15 ~ 30 s |
-| Actions 生成快照 | 0 | 5 ~ 15 min |
-
-> 如果需求是「改完 10 秒内必须看到」，只有 **PAT + API 轮询 15s** 一条路。
-> 如果接受「两分钟内」，不配 token 也够用。本方案同时支持两档，由配置切换。
+> 如果哪天真的需要秒级同步，正确路线是加一个 SSE / 长轮询的服务端，而不是回到浏览器定时器。
+> 这是当前形态明确不做的事，写在这里避免以后被当成遗漏。
 
 ---
 
@@ -130,13 +128,14 @@ todo-personal/
 │  │  └─ merge.mjs              # 三方合并（base / local / remote 逐字段判定）
 │  ├─ app/
 │  │  ├─ github.mjs             # Contents API 客户端：条件读取、带 sha 写回、配额解析
-│  │  ├─ sync.mjs               # 调度器：定时、可见性、退避、配额自适应
+│  │  ├─ sync.mjs               # 按需刷新：ETag 条件请求、并发去重、错误分型（无定时器）
 │  │  └─ ui.mjs                 # 视图与交互
 │  └─ styles.css                # 主题变量 + 响应式
 ├─ build.mjs                    # 幂等内联构建 → dist/index.html
 ├─ scripts/
 │  ├─ selftest.mjs              # 解析/补丁 55 项断言（固定夹具，不依赖 todo.md 内容）
 │  ├─ selftest-merge.mjs        # 合并 18 项断言
+│  ├─ selftest-sync.mjs         # 刷新引擎 35 项断言（假 client，无网络）
 │  └─ check-ui.js               # 真实 Chrome（CDP）跑一遍交互并截图
 └─ .github/workflows/
    └─ snapshot.yml              # 可选：Actions 生成 data/todo.json
@@ -215,21 +214,32 @@ const res = await client.write({ content: target, sha: latest.sha, token });
 if (!res.ok && res.conflict) { /* 重拉 → 合并 → 重试一次 */ }
 ```
 
-### 5.5 同步调度
+### 5.5 按需刷新（没有定期任务）
+
+`sync.mjs` 只做一件事：**调一次、返回一次结果**，不持有定时器、不注册可见性监听。
+`createSyncEngine()` 返回 `{ load, refresh, markPushed, resetEtag, state }`，
+其中 `load()` 就是首屏 / 改配置 / 清缓存后的那次 `refresh()`。
 
 ```js
-// 退避优先级：retry-after > 配额重置时间 > 指数退避
-if (e.rate?.remaining === 0)  wait = reset - now;        // 配额耗尽，别硬撞
-else if (e.rate?.retryAfter) wait = retryAfter * 1000;
-else                         wait = 2s * 2^n, 上限 5min;
+// 并发去重：连点刷新不会把配额打光，第二次直接 skipped
+if (running) return { skipped: true };
+
+const res = await client.read({ etag, token: getToken(), wantSha: false });
+if (res.status === 304) { lastOkAt = Date.now(); setPhase('not-modified'); }
+if (res.status === 200) { etag = res.etag; await onData(res.content); setPhase('ok'); }
+if (res.status === 404) { setPhase('error', '文件不存在…'); }   // 不记 lastOkAt
 ```
 
-另外三条容易被忽略的规则：
+三个细节，都是踩过的坑：
 
-- **页面隐藏就停表**（`visibilitychange`），重新可见且距上次 >15s 才立刻同步。省电也省配额。
-- **未认证时自适应拉长间隔**：`remaining < 10` 时把间隔拉到「剩余配额刚好撑到重置」的值。
-- **`x-ratelimit-remaining` 与 `retry-after` 都通过 `Access-Control-Expose-Headers` 暴露**，前端读得到，
-  不用猜。
+- **404 不能算成功**：早先版本先记时间戳再判状态码，路径写错时页面显示「刚刚同步过」，实际什么都没读到。
+- **错误分型保留**：离线 / `remaining=0` / `retry-after` / 其它，分别给人话提示。没有退避循环了，
+  但「失败原因说清楚」仍然必要。
+- **换配置要作废在飞的请求**：`engineSeq` 自增作序号，旧仓库的响应回来时序号不匹配就丢弃，
+  不会把 A 仓库的内容盖到 B 仓库的配置上。
+
+代价是不再「切回前台自动补拉」。取舍很直白：少一个自动行为，换掉一整套调度状态机，
+以及「后台悄悄覆盖本地草稿」这类难以复现的问题。
 
 ---
 
@@ -248,11 +258,11 @@ else                         wait = 2s * 2^n, 上限 5min;
 | 本地存储 | `workSrc`（工作副本）+ `remoteSrc`（基线）双份，离线可改，刷新不丢 |
 | 编辑入口 | 三种：页面内联编辑 / 页面「推送」按钮 / 直接去 GitHub 改文件 |
 | 响应式 | 375px 起可用；底部固定输入条带 `safe-area-inset` |
-| 状态可见 | 顶部 chip 显示 同步中/已同步/无变化/离线/配额受限；底部显示剩余配额 |
+| 状态可见 | 顶部 chip 显示 刷新中/已刷新/无变化/离线/配额受限；底部显示剩余配额 |
 | 主题 | 三态循环：跟随系统 → 浅色 → 深色。`auto` 不写属性、交给 `prefers-color-scheme`；`light`/`dark` 写 `<html data-theme>` 显式覆盖，选择存进 `cfg.theme` |
 | 演示模式 | 未配置仓库时用内置示例数据，零配置即可看到完整界面 |
 
-顶部三个图标各自只做一件事：**主题（半明半暗圆）/ 立即同步（环形箭头）/ 设置（齿轮）**。
+顶部三个图标各自只做一件事：**主题（半明半暗圆）/ 刷新（环形箭头）/ 设置（齿轮）**。
 早先设置按钮画成了「圆 + 八条射线」，在 16px 下和太阳图标几乎无法区分，
 用户点它期待的是切换明暗，结果弹出同步设置抽屉 —— 已把该图标换成带齿的齿轮，
 并把主题切换真正补上。
@@ -269,9 +279,9 @@ else                         wait = 2s * 2^n, 上限 5min;
    GitHub        │                                              │
 ┌─────────┐      │  ┌─────────┐   ┌──────────┐   ┌───────────┐  │
 │ todo.md │─────►│  │  sync   │──►│  parse   │──►│  render   │  │
-└─────────┘      │  │ 调度器  │   │ md.mjs   │   │  ui.mjs   │  │
+└─────────┘      │  │  刷新   │   │ md.mjs   │   │  ui.mjs   │  │
      ▲           │  └────┬────┘   └──────────┘   └─────┬─────┘  │
-     │           │       │ 304 就跳过                  │ 用户操作 │
+     │           │       │ 304 → 跳过                  │ 用户操作 │
      │           │       ▼                             ▼        │
      │           │  ┌─────────────┐          ┌──────────────┐   │
      │           │  │ state:      │◄─────────│ patchTask    │   │
@@ -286,11 +296,11 @@ else                         wait = 2s * 2^n, 上限 5min;
                  └──────────────────────────────────────────────┘
 ```
 
-一次同步的判定链：
+一次刷新的判定链：
 
-1. **触发**：可见性变化 / 定时器到点 / 手动刷新 / 网络恢复。
+1. **触发**：打开页面 / 保存配置 / 点顶栏刷新。没有定时器，也没有可见性自动补拉。
 2. **取数**：带上次的 `ETag` 发条件请求。
-   - `304` → 内容没变，只更新「上次检查时间」，**不重绘**。
+   - `304` → 内容没变，更新「上次刷新时间」，**不重绘**。
    - `200` → 拿到新内容，比较 `content === remoteSrc`。
 3. **分流**：
    - 本地无改动 → 直接用远端覆盖 `workSrc`，重绘。
@@ -350,8 +360,8 @@ https://leoli04.github.io/todo-personal/#repo=leoli04/todo-personal&branch=main&
 
 | 限制 | 说明 | 缓解 |
 |---|---|---|
-| 未认证 304 也计费 | 实测 remaining 会掉 | 配置 token，或把间隔提到 ≥120s |
-| raw 有最长 300s 盲区 | CDN TTL 内回 304 | 需要快就配 token 走 API |
+| 未认证 304 也计费 | 实测 `remaining` 会掉 | 配 token；或不管它——一天点几次刷新，离 60 次 / 小时很远 |
+| 刷新是手动的 | 不会自己发现远端变化 | 打开页面时本来就会拉一次；改完 GitHub 等部署完手动点一下 |
 | 页面内写回需 PAT | 浏览器拿不到 OAuth 之外的凭证 | fine-grained + 最小权限 + 90 天过期；或走形态 C |
 | 合并只做字段级 | 不支持任务在分组间移动的自动合并 | 结构以远端为准；移动操作需人工确认 |
 | 大文件未分页 | 单次 GET 有 1 MB 上限（Contents API） | Todo 场景远达不到；超了改用 raw 或分文件 |
@@ -365,9 +375,15 @@ https://leoli04.github.io/todo-personal/#repo=leoli04/todo-personal&branch=main&
 ```bash
 node scripts/selftest.mjs        # 解析 / 补丁 / 序列化：55 项
 node scripts/selftest-merge.mjs  # 三方合并：18 项
+node scripts/selftest-sync.mjs   # 按需刷新：35 项（假 client，无网络无 DOM）
 node build.mjs                   # 构建 dist/index.html
-node scripts/check-ui.js         # 真实 Chrome 跑交互 + 出图：26 项断言
+node scripts/check-ui.js         # 真实 Chrome 跑交互 + 出图：31 项断言
 ```
+
+`selftest-sync.mjs` 覆盖刷新引擎的全部分支：200 首屏、304 带 ETag 的二次刷新、404 不谎报成功、
+离线、配额耗尽、`retry-after`、并发去重（连点只发一次请求）、写回后 ETag 接管、`resetEtag`，
+以及一条源码级断言——`sync.mjs` 里不允许出现 `setInterval` / `setTimeout` / `visibilitychange`，
+防止轮询以后被悄悄加回来。
 
 `check-ui.js` 用 CDP 驱动真实 Chrome（不是 jsdom），断言的是**渲染后的 DOM**而不是函数返回值，
 且失败时以退出码 1 结束，可直接进 CI：
@@ -379,7 +395,8 @@ node scripts/check-ui.js         # 真实 Chrome 跑交互 + 出图：26 项断�
 - 新增 `CDP 验证任务 #测试 @due(2026-12-01) !p2` → 标签/截止/优先级全部落到行内
 - 行内编辑 → 标题与标签同时更新，编辑框关闭
 - 看板 → 按状态分列渲染
-- 设置抽屉 → 两个可带走项一行放下、无溢出
+- 设置抽屉 → 两个可带走项一行放下、无溢出；**已无「同步间隔」字段**，配置里不再持久化 interval
+- 刷新按钮 → 语义为「刷新」；未配置仓库时点它只给提示，不抛错
 - 主题 → 三态循环各落对属性、显式深色压过系统浅色、深色系统下选浅色同样生效、选择写盘；
   两处浅色色板（显式 + 系统）用 CSSOM 比对，变量名与值必须完全一致
 - 删除 → 目标从数据源消失且总数 -1
@@ -388,4 +405,4 @@ node scripts/check-ui.js         # 真实 Chrome 跑交互 + 出图：26 项断�
 - 链接即配置：三种输入形态 + 真导航后写盘并清 hash；错误态不谎报「已同步」
 - console 错误 0
 
-最近一次结果：`55/55`、`18/18`、UI `26/26`（长标题 3 条已量）。
+最近一次结果：`55/55`、`18/18`、`35/35`、UI `31/31`（长标题 3 条已量）。

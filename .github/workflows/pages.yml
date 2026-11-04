@@ -47,6 +47,9 @@ jobs:
       - name: 三方合并自检
         run: node scripts/selftest-merge.mjs
 
+      - name: 按需刷新自检
+        run: node scripts/selftest-sync.mjs
+
       - name: 构建单文件产物
         run: node build.mjs
 

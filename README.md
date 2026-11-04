@@ -1,24 +1,24 @@
 # todo-personal
 
 **把 Markdown 文件当数据库的个人待办工具。** 数据是仓库里那份 [`todo.md`](todo.md)，
-页面读它、改它，改完推回去就是一个 commit；在 GitHub 网页上改 Markdown，页面也会自动跟上。
+页面读它、改它，改完推回去就是一个 commit。
 
 - 在线版：<https://leoli04.github.io/todo-personal/>
 - 单文件产物，双击即跑，无后端、无框架、无 CDN
-- GitHub 上改 Markdown → 页面定时/切回前台时自动同步
+- **不做后台轮询**：打开页面或点顶栏刷新时拉一次最新内容
 - 页面内勾选、增删改、行内编辑，改动先落本地草稿，确认后再推送
 - 多端同时改动时做三方合并，不静默覆盖
 
-完整方案（含实测数据、同步延迟量化、取舍说明）见 [`docs/DESIGN.md`](docs/DESIGN.md)。
+完整方案（含实测数据、取舍说明）见 [`docs/DESIGN.md`](docs/DESIGN.md)。
 
 ## 快速开始
 
 无需安装依赖（零 dependency），只要有 Node ≥ 20：
 
 ```bash
-npm run build     # → dist/index.html（约 69 KB）
-npm test          # 核心 55 项 + 三方合并 18 项
-npm run check:ui  # 可选：真实 Chrome 跑交互并出图，26 项断言，失败即退出码 1
+npm run build     # → dist/index.html（约 70 KB）
+npm test          # 核心 55 项 + 三方合并 18 项 + 按需刷新 35 项
+npm run check:ui  # 可选：真实 Chrome 跑交互并出图，31 项断言，失败即退出码 1
 ```
 
 不想用 npm 就直连脚本：`node build.mjs`、`node scripts/selftest.mjs`、`node scripts/check-ui.js`。
@@ -39,7 +39,7 @@ npm run check:ui  # 可选：真实 Chrome 跑交互并出图，26 项断言，�
 手机/平板/第二台电脑要打开，就把页面挂到 GitHub Pages：
 
 1. 仓库 **Settings → Pages → Source** 选 **GitHub Actions**（只用点这一次）。
-2. push 到 `main`：`.github/workflows/pages.yml` 会跑两套自检 → 构建 → 发布 `dist/`。
+2. push 到 `main`：`.github/workflows/pages.yml` 会跑三套自检 → 构建 → 发布 `dist/`。
    自检不过就不发布。
 3. 地址形如 `https://<owner>.github.io/<repo>/`，手机浏览器直接打开。
 
@@ -65,15 +65,19 @@ https://<owner>.github.io/<repo>/#repo=<owner>/<repo>&branch=main&path=todo.md
 ⚠️ `file://` 打开和 `https://` 打开是**两个互不相通的存储空间**（origin 不同），
 在两者之间切换等于从零开始：配置要重填、草稿看不见。选一种方式就固定用它。
 
-## 同步延迟
+## 刷新，不轮询
 
-| 通道 | 第一个能看到新内容的时刻 |
-|---|---|
-| 不配 token（raw CDN） | 0 ~ 5 分钟 |
-| 不配 token（API 轮询） | 1 ~ 2 分钟 |
-| 配 token（API + ETag） | 15 ~ 30 秒 |
+在 GitHub 上改 `todo.md` 会触发 Actions → Pages 重新部署。页面本身不变，变的是它要读的数据，
+所以这里**没有定时器、没有后台轮询**：打开页面时拉一次，之后点顶栏的刷新按钮再拉一次。
 
-选哪档由「同步间隔」和「有没有 token」共同决定，代码会按剩余配额自适应拉长间隔，不会把配额打光。
+| 动作 | 请求 | 说明 |
+|---|---|---|
+| 打开页面 / 保存配置 | 1 次 Contents API | 首屏取数 |
+| 点刷新，内容没变 | 1 次，返回 304 | 带 ETag，省流量；带 token 时 304 还不计配额 |
+| 点刷新，内容变了 | 1 次，返回 200 | 覆盖工作副本；本地有草稿则提示合并，不静默覆盖 |
+
+成本可以忽略：未认证 60 次/小时、带 token 5000 次/小时，
+而「改完 GitHub → 等部署 → 点一下刷新」这个节奏，一天也就几次。
 
 ## 项目结构
 
@@ -81,7 +85,7 @@ https://<owner>.github.io/<repo>/#repo=<owner>/<repo>&branch=main&path=todo.md
 src/core/md.mjs     解析 / 行级补丁 / 序列化
 src/core/merge.mjs  三方合并
 src/app/github.mjs  Contents API 客户端
-src/app/sync.mjs    调度与退避
+src/app/sync.mjs    按需拉取（ETag 条件请求 + 错误分型）
 src/app/ui.mjs      界面
 build.mjs           幂等内联构建
 dist/index.html     产物

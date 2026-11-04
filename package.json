@@ -1,6 +1,6 @@
 {
   "name": "todo-personal",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Markdown-on-GitHub 个人待办：仓库里的 todo.md 当数据库，单文件页面读写它",
   "homepage": "https://leoli04.github.io/todo-personal/",
@@ -14,7 +14,7 @@
   },
   "scripts": {
     "build": "node build.mjs",
-    "test": "node scripts/selftest.mjs && node scripts/selftest-merge.mjs",
+    "test": "node scripts/selftest.mjs && node scripts/selftest-merge.mjs && node scripts/selftest-sync.mjs",
     "check:ui": "node scripts/check-ui.js",
     "snapshot": "node scripts/make-snapshot.mjs",
     "all": "npm test && npm run build"
