@@ -10,6 +10,9 @@ on:
       - 'src/**'
       - 'build.mjs'
       - '.github/workflows/pages.yml'
+      # todo.md 会被 build.mjs 烘进产物：只改待办内容也必须重新发布，
+      # 否则线上页面一直停在旧数据（试过：改了 todo.md 但没触发 deploy pages）。
+      - 'todo.md'
   workflow_dispatch:
 
 permissions:
