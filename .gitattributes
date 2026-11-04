@@ -1,0 +1,7 @@
+# 行尾统一为 LF：本项目的幂等性依赖「按文件字节算哈希」，
+# 换机器 clone 后若 CRLF 化，构建会整片误判为 stale。
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary

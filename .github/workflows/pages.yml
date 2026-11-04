@@ -1,0 +1,56 @@
+name: deploy pages
+
+# 把 dist/ 发到 GitHub Pages。产物是纯静态单文件，不需要任何运行时。
+# 前置：仓库 Settings → Pages → Source 选 "GitHub Actions"（只需点一次）。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'build.mjs'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 测试不过就不发布，避免把坏版本推上线
+      - name: 核心逻辑自检
+        run: node scripts/selftest.mjs
+
+      - name: 三方合并自检
+        run: node scripts/selftest-merge.mjs
+
+      - name: 构建单文件产物
+        run: node build.mjs
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

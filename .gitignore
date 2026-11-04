@@ -1,0 +1,16 @@
+# 依赖 / 构建缓存
+node_modules/
+*.log
+
+# 自检产物（截图与报告只是本地证据，不进仓库）
+_shots/
+
+# 编辑器与系统
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 本地临时文件（诊断输出、一次性脚本产物）
+_*.out.txt
+_*.txt

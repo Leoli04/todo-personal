@@ -1,0 +1,136 @@
+{
+  "generatedAt": "2026-11-04T03:26:30.814Z",
+  "title": "Leo 的待办",
+  "groups": [
+    "工作",
+    "生活",
+    "学习"
+  ],
+  "stats": {
+    "total": 9,
+    "done": 2,
+    "open": 7,
+    "pct": 22
+  },
+  "tasks": [
+    {
+      "id": "i0a1b2c",
+      "title": "写 Q4 OKR 初稿并同步给组内",
+      "checked": false,
+      "tags": [
+        "工作"
+      ],
+      "due": "2026-11-06",
+      "priority": 1,
+      "group": "工作",
+      "doneAt": null,
+      "overdue": false
+    },
+    {
+      "id": "i3d4e5f",
+      "title": "修复 bill-service 空指针（工单 #8821）",
+      "checked": false,
+      "tags": [
+        "工作"
+      ],
+      "due": null,
+      "priority": 2,
+      "group": "工作",
+      "doneAt": null,
+      "overdue": false
+    },
+    {
+      "id": "i6a7b8c",
+      "title": "拆分 SKILL.md 类型 6/7 的 SQL 规则",
+      "checked": true,
+      "tags": [
+        "工作"
+      ],
+      "due": null,
+      "priority": null,
+      "group": "工作",
+      "doneAt": "2026-11-02",
+      "overdue": false
+    },
+    {
+      "id": "i9d0e1f",
+      "title": "评审 RepoCensus v1.8 的 PRD 变更",
+      "checked": false,
+      "tags": [
+        "开源",
+        "评审"
+      ],
+      "due": "2026-11-10",
+      "priority": 2,
+      "group": "工作",
+      "doneAt": null,
+      "overdue": false
+    },
+    {
+      "id": "i2a3b4c",
+      "title": "修空调（卧室那台，制冷慢）",
+      "checked": false,
+      "tags": [
+        "家事"
+      ],
+      "due": "2026-11-05",
+      "priority": null,
+      "group": "生活",
+      "doneAt": null,
+      "overdue": false
+    },
+    {
+      "id": "i5d6e7f",
+      "title": "带娃去体检",
+      "checked": false,
+      "tags": [
+        "家事",
+        "孩子"
+      ],
+      "due": "2026-11-15",
+      "priority": null,
+      "group": "生活",
+      "doneAt": null,
+      "overdue": false
+    },
+    {
+      "id": "i8a9b0c",
+      "title": "买奶粉 + 淡奶油（做奶糕用）",
+      "checked": true,
+      "tags": [
+        "家事"
+      ],
+      "due": null,
+      "priority": null,
+      "group": "生活",
+      "doneAt": "2026-11-01",
+      "overdue": false
+    },
+    {
+      "id": "e124whfu",
+      "title": "看完《Designing Data-Intensive Applications》第 6 章",
+      "checked": false,
+      "tags": [
+        "读书"
+      ],
+      "due": null,
+      "priority": null,
+      "group": "学习",
+      "doneAt": null,
+      "overdue": false
+    },
+    {
+      "id": "e1vgiwih",
+      "title": "给 dashboard 加一个周报视图",
+      "checked": false,
+      "tags": [
+        "开源"
+      ],
+      "due": null,
+      "priority": null,
+      "group": "学习",
+      "doneAt": null,
+      "overdue": false
+    }
+  ]
+}
