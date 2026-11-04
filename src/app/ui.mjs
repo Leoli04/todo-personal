@@ -20,7 +20,7 @@ const LS = {
 
 const DEFAULT_CFG = {
   owner: '', repo: '', branch: 'main', path: 'todo.md',
-  autoPush: false, theme: 'auto',
+  theme: 'auto',
 };
 
 /* --------------------------------------------------------------- state */
@@ -528,11 +528,6 @@ function drawerHTML() {
       Fine-grained token，只勾这一个仓库的 <b>Contents: Read and write</b> 即可。
       留空表示只读模式（页面不写回，改动仅存本地）。
     </p>
-    <label class="field field--switch">
-      <input type="checkbox" id="cfg-autopush" ${c.autoPush ? 'checked' : ''} />
-      <span>勾选后自动推送（延迟 3 秒合并提交）</span>
-    </label>
-
     <div class="drawer-actions">
       <button class="btn-ghost" data-act="probe">测试连接</button>
       <button class="btn-primary" data-act="save-cfg">保存并刷新</button>
@@ -661,20 +656,11 @@ function renderListOnly() {
 
 /* --------------------------------------------------------------- events */
 
-let autoPushTimer = null;
-
-function scheduleAutoPush() {
-  if (!S.cfg.autoPush || !loadToken() || !configured()) return;
-  clearTimeout(autoPushTimer);
-  autoPushTimer = setTimeout(() => pushNow(), 3000);
-}
-
 function mutate(fn) {
   const before = S.workSrc;
   const r = fn(S.workSrc);
   if (r && r.src !== undefined && r.src !== before) {
     setWork(r.src);
-    scheduleAutoPush();
   }
   return r;
 }
@@ -766,7 +752,6 @@ document.addEventListener('click', async (e) => {
       S.cfg.repo = $('#cfg-repo').value.trim();
       S.cfg.branch = $('#cfg-branch').value.trim() || 'main';
       S.cfg.path = $('#cfg-path').value.trim() || 'todo.md';
-      S.cfg.autoPush = $('#cfg-autopush').checked;
       const tk = $('#cfg-token').value.trim();
       if (tk) saveToken(tk);
       persist();

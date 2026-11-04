@@ -465,7 +465,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check('抽屉：已无「同步间隔」字段',
     R.drawer.hasIntervalField === false && !R.drawer.fields.includes('cfg-interval'), R.drawer.fields);
   check('配置项：不再持久化 interval',
-    R.drawer.cfgKeys === 'autoPush,branch,owner,path,repo,theme', R.drawer.cfgKeys);
+    R.drawer.cfgKeys === 'branch,owner,path,repo,theme', R.drawer.cfgKeys);
   check('状态：不再暴露轮询相关字段（interval/nextAt）',
     !/interval|nextAt/.test(R.drawer.syncKeys), R.drawer.syncKeys);
   check('按钮语义：是「刷新」不是「同步」',

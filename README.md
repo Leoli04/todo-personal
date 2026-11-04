@@ -43,7 +43,7 @@ npm run check:ui  # 可选：真实 Chrome 跑交互并出图，31 项断言，�
    自检不过就不发布。
 3. 地址形如 `https://<owner>.github.io/<repo>/`，手机浏览器直接打开。
 
-仓库是私有的话，Pages 需要账号有 Pro；不想公开也不想付费，就退回「本地文件 + 快照中转」形态。
+仓库是私有的话，Pages 需要账号有 Pro（免费账号请把仓库设为公开，私有仓库不能开 Pages）。
 
 ## 换电脑 / 换手机
 
@@ -89,8 +89,8 @@ src/app/sync.mjs    按需拉取（ETag 条件请求 + 错误分型）
 src/app/ui.mjs      界面
 build.mjs           幂等内联构建
 dist/index.html     产物
-.github/workflows/  pages.yml（发布）· snapshot.yml（私有仓库快照）
-scripts/            自检 + 快照生成 + CDP 复核
+.github/workflows/  pages.yml（自检 → 构建 → 发布）
+scripts/            三套自检 + CDP 真实渲染复核
 ```
 
 改 `src/` 后跑 `node build.mjs` 重新生成产物；不要直接改 `dist/index.html`。

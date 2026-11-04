@@ -42,9 +42,9 @@
 
 ---
 
-## 2. 三种部署形态
+## 2. 两种部署形态
 
-按「仓库是否私有」「页面是否需要写回」分成三档，**从 A 起步，按需升级**。
+按「仓库是否私有」「页面是否需要写回」分成两档，**从 A 起步，按需升级**。
 
 ### A. 直连只读（公开仓库，零凭证）
 
@@ -66,17 +66,12 @@ todo.md ◄──(Contents API + PAT)──► index.html ◄──► localStor
 - 权限最小化：fine-grained token，只授权**这一个仓库**的 `Contents: Read and write`，设 90 天过期。
 - 私有仓库**必须**走这一档（raw 对私有内容需要凭证，且浏览器侧无法安全注入）。
 
-### C. 快照中转（私有仓库 + 不想在页面里放 token）
+本仓库实现了 **A 和 B**。
 
-```
-todo.md ──(Actions cron)──► data/todo.json ──► Pages ──► index.html
-```
-
-- token 只存在于 Actions secrets，页面拿同源 JSON，零 CORS、零配额、CDN 快。
-- 代价：延迟 5~15 分钟；写回要靠 GitHub 网页或 Issue 表单。
-- 适合「只给家人/自己看，编辑都在 GitHub 上做」的场景。
-
-本仓库实现了 **A 和 B**，并附上 C 的 workflow 模板（`snapshot.yml`，默认不启用）。
+早先还试过「Actions 定时把 `todo.md` 烘成 JSON 再让页面读」的第三档（形态 C），已删除：
+它要靠 cron 跑，而 Actions cron 最小间隔 5 分钟、高峰常排队到 8~15 分钟，
+延迟比手动点一次刷新还大，还多养一条 workflow 和一个中间文件。
+实测数据见上一节的 Actions cron 一行。
 
 ---
 
@@ -138,7 +133,7 @@ todo-personal/
 │  ├─ selftest-sync.mjs         # 刷新引擎 35 项断言（假 client，无网络）
 │  └─ check-ui.js               # 真实 Chrome（CDP）跑一遍交互并截图
 └─ .github/workflows/
-   └─ snapshot.yml              # 可选：Actions 生成 data/todo.json
+   └─ pages.yml                 # push 触发：自检 → 构建 → 发布
 ```
 
 **为什么开发态拆模块、交付态拼单文件：**
@@ -267,8 +262,9 @@ if (res.status === 404) { setPhase('error', '文件不存在…'); }   // 不记
 用户点它期待的是切换明暗，结果弹出同步设置抽屉 —— 已把该图标换成带齿的齿轮，
 并把主题切换真正补上。
 
-**默认不自动推送。** 改动先落本地草稿，顶部出现「本地有未推送改动 → 立即推送」。
-理由：手机误触勾选就触发一次 commit，会把 git 历史弄脏。要自动就开开关，走 3 秒 debounce。
+**只有手动推送，没有自动推送。** 改动先落本地草稿，顶部出现「本地有未推送改动 → 立即推送」，
+点一下才写回。理由：手机误触勾选就触发一次 commit，会把 git 历史弄脏；
+再加一个「延迟 3 秒自动推」的开关，等于给同一件事做两条路径，已删掉。
 
 ---
 
