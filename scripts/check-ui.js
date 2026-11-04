@@ -128,36 +128,48 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     };
   })()`);
 
-  // —— 3. 搜索
+  // —— 3. 搜索（关键词与期望值都从真实数据推导，不写死示例内容）
   report.search = await ev(`(() => {
+    document.querySelector('[data-status="all"]').click();
+    const S = window.__todo.S;
     const set = (v) => {
       const q = document.querySelector('#q');
       q.value = v;
       q.dispatchEvent(new Event('input', { bubbles: true }));
     };
-    set('空调');
+    const hay = (t) => (t.title + ' ' + t.tags.join(' ') + ' ' + t.group).toLowerCase();
+    const longest = S.doc.tasks.map(t => t.title).sort((a, b) => b.length - a.length)[0] || '';
+    const needle = longest.slice(0, 4);
+    const expected = S.doc.tasks.filter(t => hay(t).includes(needle.toLowerCase())).length;
+    set(needle);
     const filtered = document.querySelectorAll('.task').length;
     const inputKept = !!document.querySelector('#q');
     set('');
     return {
-      filtered, restored: document.querySelectorAll('.task').length,
+      needle, expected, filtered,
+      restored: document.querySelectorAll('.task').length,
       qState: window.__todo.S.filters.q, inputKept,
-      sameNode: document.querySelector('#q') === document.querySelector('#q'),
     };
   })()`);
 
-  // —— 4. 标签筛选
+  // —— 4. 标签筛选（取数据里最高频的标签，避免依赖「家事」这类示例词）
   report.tagFilter = await ev(`(() => {
-    const chip = [...document.querySelectorAll('.tagbar .tag')].find(b => b.dataset.tag === '家事');
-    if (!chip) return { error: 'no chip' };
+    const S = window.__todo.S;
+    const freq = {};
+    S.doc.tasks.forEach(t => t.tags.forEach(x => { freq[x] = (freq[x] || 0) + 1; }));
+    const tag = Object.keys(freq).sort((a, b) => freq[b] - freq[a])[0];
+    if (!tag) return { error: 'no tag in data' };
+    const chip = [...document.querySelectorAll('.tagbar .tag')].find(b => b.dataset.tag === tag);
+    if (!chip) return { error: 'chip not found', tag };
     chip.click();
     const n = document.querySelectorAll('.task').length;
-    const allHome = [...document.querySelectorAll('.task')].every(el => {
-      const t = window.__todo.S.doc.tasks.find(x => x.id === el.dataset.id);
-      return t && t.tags.includes('家事');
+    const all = [...document.querySelectorAll('.task')].every(el => {
+      const t = S.doc.tasks.find(x => x.id === el.dataset.id);
+      return t && t.tags.includes(tag);
     });
+    const expected = S.doc.tasks.filter(t => t.tags.includes(tag)).length;
     document.querySelector('[data-act="clear-tags"]')?.click();
-    return { filtered: n, allHome, restored: document.querySelectorAll('.task').length, tags: [...window.__todo.S.filters.tags] };
+    return { tag, expected, filtered: n, all, restored: document.querySelectorAll('.task').length };
   })()`);
 
   // —— 4.5 重置筛选，确保后续断言看到全量
@@ -166,6 +178,29 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     S.filters.q = ''; S.filters.tags = []; S.filters.group = '';
     document.querySelector('[data-status="open"]').click();
     return { tasks: document.querySelectorAll('.task').length, q: S.filters.q, tags: S.filters.tags };
+  })()`);
+
+  // —— 4.6 长标题布局：真实数据里最长的几条（如「读《…》」类条目）量一次包围盒
+  report.wrap = await ev(`(() => {
+    const rows = [...document.querySelectorAll('.task')].filter(el => {
+      const t = window.__todo.S.doc.tasks.find(x => x.id === el.dataset.id);
+      return t && t.title.length > 30;
+    });
+    const bad = [];
+    for (const el of rows) {
+      const main = el.querySelector('.task-main');
+      const title = el.querySelector('.task-title');
+      const meta = el.querySelector('.task-meta');
+      if (!main || !title) continue;
+      const label = title.textContent.slice(0, 18);
+      const tr = title.getBoundingClientRect();
+      const box = main.getBoundingClientRect();
+      const over = title.scrollWidth - title.clientWidth;
+      if (over > 1) bad.push({ reason: 'h-overflow', over, label });
+      if (tr.right > box.right + 1) bad.push({ reason: 'out-of-box', label });
+      if (meta && meta.getBoundingClientRect().top < tr.bottom - 1) bad.push({ reason: 'meta-overlap', label });
+    }
+    return { checked: rows.length, bad };
   })()`);
 
   // —— 5. 新增任务（含自然语言解析）
@@ -325,7 +360,46 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
   fs.writeFileSync(path.join(OUT, 'todo-urlcfg.png'), Buffer.from(shot.data, 'base64'));
 
+  // —— 11. 断言：把「人工看 JSON」变成能卡住 CI 的硬校验
+  const fails = [];
+  let total = 0;
+  const check = (name, cond, detail) => {
+    total++;
+    if (!cond) fails.push(name + (detail === undefined ? '' : ' :: ' + JSON.stringify(detail)));
+  };
+  const R = report;
+
+  check('首屏：应用挂载且有数据', R.boot.hasApp && R.boot.totalParsed > 0, R.boot);
+  check('首屏：无横向溢出', R.boot.hOverflow === 0, R.boot.hOverflow);
+  check('勾选：状态翻转', R.toggle.checked === true, R.toggle);
+  check('勾选：写入 @done', R.toggle.hasDoneTag === true, R.toggle.firstLine);
+  check('勾选：只落草稿、不自动推送', R.toggle.dirty === true && R.toggle.bannerShown === true, R.toggle);
+  check('搜索：命中数与数据一致', R.search.filtered === R.search.expected, R.search);
+  check('搜索：清空后恢复全量', R.search.restored === R.boot.totalParsed && R.search.qState === '', R.search);
+  check('标签：只留命中项', R.tagFilter.all === true && R.tagFilter.filtered === R.tagFilter.expected, R.tagFilter);
+  check('新增：落地到数据源', R.add.created === true && R.add.totalAfter === R.add.totalBefore + 1, R.add);
+  check('新增：自然语言解析正确',
+    Array.isArray(R.add.tags) && R.add.tags.includes('测试') && R.add.due === '2026-12-01' && R.add.prio === 2, R.add);
+  check('编辑：标题与标签一起生效',
+    R.edit.title === '改过的标题' && Array.isArray(R.edit.tags) && R.edit.tags.includes('改') && R.edit.editClosed === true, R.edit);
+  check('看板：分列渲染', R.board.cols >= 2 && R.board.perCol.some((n) => n > 0), R.board);
+  check('抽屉：两个链接一行放下',
+    R.drawer.open === true && R.drawer.linkCount === 2 && R.drawer.footOverflow === 0, R.drawer);
+  check('删除：数据源同步移除', R.remove.gone === true && R.remove.after === R.remove.before - 1, R.remove);
+  check('持久化：草稿与基线都落本地', R.persist.work === true && R.persist.base === true, R.persist);
+  check('长标题：不溢出、不与元信息重叠', R.wrap.bad.length === 0, R.wrap);
+  check('移动端 375：无横向溢出', R.mobile.hOverflow === 0, R.mobile);
+  check('链接即配置：三种输入形态',
+    R.urlCfg.full.repo === 'repocensus' && R.urlCfg.hash.branch === 'dev' && R.urlCfg.nameOnly.owner === 'someone', R.urlCfg);
+  check('链接即配置：真导航后写盘并清 hash',
+    R.urlNav.hashCleared === true && R.urlNav.persisted === true && R.urlNav.demoBannerGone === true, R.urlNav);
+  // 仓库不可达（404）时不能显示「刚刚同步过」；若该仓库真实存在则跳过此断言
+  check('错误态：不谎报已同步', R.urlNav.phase !== 'error' || R.urlNav.lastOkAt === 0, { phase: R.urlNav.phase, lastOkAt: R.urlNav.lastOkAt });
+  check('console 无错误', R.logs.length === 0, R.logs);
+
   fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2), 'utf8');
   console.log(JSON.stringify(report, null, 2));
+  console.log(fails.length ? `UI FAIL:\n- ${fails.join('\n- ')}` : `UI passed ${total}/${total}（长标题 ${R.wrap.checked} 条已量）`);
   chrome.kill();
+  process.exitCode = fails.length ? 1 : 0;
 })().catch((e) => { console.log('FATAL: ' + e.stack); process.exit(1); });

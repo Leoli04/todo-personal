@@ -12,7 +12,46 @@ import {
 } from '../src/core/md.mjs';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const SAMPLE = readFileSync(resolve(__dir, '../todo.md'), 'utf8');
+
+/**
+ * 固定夹具：自检必须与 todo.md 的真实内容解耦。
+ * 曾经直接读 todo.md 当夹具，结果「往待办里加两条」就让 stats 断言全红——
+ * 测试应当只对语法与补丁行为负责，不对用户数据负责。
+ */
+const SAMPLE = [
+  '# Leo 的待办',
+  '',
+  '> 数据源说明：本文件既是人读的清单，也是这个 Todo 页面的数据库。',
+  '> 页面按行解析，**只改动你操作的那一行**，其余内容原样保留。',
+  '> 团队协作 / 手机快速记录时，直接在 GitHub 网页或 App 里编辑这个文件即可。',
+  '',
+  '## 工作',
+  '',
+  '- [ ] 写 Q4 OKR 初稿并同步给组内 #工作 @due(2026-11-06) !p1 <!--id:i0a1b2c-->',
+  '- [ ] 修复 bill-service 空指针（工单 #8821） #工作 !p2 <!--id:i3d4e5f-->',
+  '- [x] 拆分 SKILL.md 类型 6/7 的 SQL 规则 #工作 <!--id:i6a7b8c @done(2026-11-02)-->',
+  '- [ ] 评审 RepoCensus v1.8 的 PRD 变更 #开源 #评审 @due(2026-11-10) !p2 <!--id:i9d0e1f-->',
+  '',
+  '## 生活',
+  '',
+  '- [ ] 修空调（卧室那台，制冷慢） #家事 @due(2026-11-05) <!--id:i2a3b4c-->',
+  '- [ ] 带娃去体检 #家事 #孩子 @due(2026-11-15) <!--id:i5d6e7f-->',
+  '- [x] 买奶粉 + 淡奶油（做奶糕用） #家事 <!--id:i8a9b0c @done(2026-11-01)-->',
+  '',
+  '## 学习',
+  '',
+  '- [ ] 看完《Designing Data-Intensive Applications》第 6 章 #读书',
+  '- [ ] 给 dashboard 加一个周报视图 #开源',
+  '',
+  '```markdown',
+  '<!-- 这里的 - [ ] 不会出现在页面里，代码块内容被解析器跳过 -->',
+  '- [ ] 这行是示例，不是任务',
+  '```',
+  '',
+].join('\n');
+
+/** 真实数据源：只校验「能解析且往返不丢字节」，不写死任何数量 */
+const LIVE = readFileSync(resolve(__dir, '../todo.md'), 'utf8');
 
 let pass = 0;
 const fails = [];
@@ -152,6 +191,20 @@ eq('stats：完成率', st.pct, 22);
 ok('overdue：过期未完成判 true', isOverdue({ due: '2026-11-01', checked: false }, '2026-11-04') === true);
 ok('overdue：已完成不判逾期', isOverdue({ due: '2026-11-01', checked: true }, '2026-11-04') === false);
 ok('overdue：无截止不判', isOverdue({ due: null, checked: false }, '2026-11-04') === false);
+
+/* ------------------------------------------------- 8. 真实数据源自洽性 */
+
+const live = parse(LIVE);
+ok('todo.md：可解析且至少有一个任务', live.tasks.length > 0);
+ok('todo.md：往返字节一致（不丢 BOM/EOL/空行）',
+  (live.bom ? '\uFEFF' : '') + live.lines.join(live.eol) === LIVE);
+ok('todo.md：每个任务的标题非空', live.tasks.every((t) => t.title.length > 0));
+// 只查「固化 id」的唯一性：ephemeral id 由 (分组,标题) 派生，同名任务天然同 id，
+// 那是设计取舍（同组同名本就不是两条不同的待办），不该让 CI 红。
+const solidIds = live.tasks.filter((t) => !t.ephemeral).map((t) => t.id);
+ok('todo.md：显式 id 不重复（重复会让补丁打到错行）',
+  new Set(solidIds).size === solidIds.length);
+
 
 /* ---------------------------------------------------------------- 汇总 */
 

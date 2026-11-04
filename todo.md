@@ -21,6 +21,8 @@
 
 - [ ] 看完《Designing Data-Intensive Applications》第 6 章 #读书
 - [ ] 给 dashboard 加一个周报视图 #开源
+- [ ] 读《Super-agent 设计探索》——DeepSeek：双层 Router/Worker + 事件驱动，真正瓶颈是人的注意力 #AI #阅读 !p2
+- [ ] 读《AI 代理的上下文工程》——Manus 六原则：KV 缓存优先、遮蔽而非移除工具、文件系统当记忆 #AI #阅读 !p2
 
 ```markdown
 <!-- 这里的 - [ ] 不会出现在页面里，代码块内容被解析器跳过 -->

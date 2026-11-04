@@ -135,7 +135,7 @@ todo-personal/
 │  └─ styles.css                # 主题变量 + 响应式
 ├─ build.mjs                    # 幂等内联构建 → dist/index.html
 ├─ scripts/
-│  ├─ selftest.mjs              # 解析/补丁 51 项断言
+│  ├─ selftest.mjs              # 解析/补丁 55 项断言（固定夹具，不依赖 todo.md 内容）
 │  ├─ selftest-merge.mjs        # 合并 18 项断言
 │  └─ check-ui.js               # 真实 Chrome（CDP）跑一遍交互并截图
 └─ .github/workflows/
@@ -357,23 +357,27 @@ https://leoli04.github.io/todo-personal/#repo=leoli04/todo-personal&branch=main&
 ## 10. 自检
 
 ```bash
-node scripts/selftest.mjs        # 解析 / 补丁 / 序列化：51 项
+node scripts/selftest.mjs        # 解析 / 补丁 / 序列化：55 项
 node scripts/selftest-merge.mjs  # 三方合并：18 项
 node build.mjs                   # 构建 dist/index.html
-node scripts/check-ui.js         # 真实 Chrome 跑交互 + 出图
+node scripts/check-ui.js         # 真实 Chrome 跑交互 + 出图：21 项断言
 ```
 
-`check-ui.js` 用 CDP 驱动真实 Chrome（不是 jsdom），断言的是**渲染后的 DOM**而不是函数返回值：
+`check-ui.js` 用 CDP 驱动真实 Chrome（不是 jsdom），断言的是**渲染后的 DOM**而不是函数返回值，
+且失败时以退出码 1 结束，可直接进 CI：
 
-- 首屏 9 条任务解析、7 条待办显示、横向溢出 = 0
-- 勾选后：状态翻转、`@done` 写入、**全文 diff 恰好 1 行**、草稿提示出现
-- 搜索「空调」→ 1 条，清空 → 恢复 6 条，且输入框节点未被替换（局部重绘生效）
-- 标签「家事」→ 2 条且全部含该标签
+- 首屏：应用挂载、解析出的任务数 > 0、页面横向溢出 = 0
+- 勾选：状态翻转、`@done` 写入、只落草稿不自动推送、草稿提示出现
+- 搜索：关键词与命中数**由真实数据推导**（不写死示例内容），清空后恢复全量且输入框节点未被替换
+- 标签筛选：用数据中最高频的标签，命中项必须全部含该标签
 - 新增 `CDP 验证任务 #测试 @due(2026-12-01) !p2` → 标签/截止/优先级全部落到行内
 - 行内编辑 → 标题与标签同时更新，编辑框关闭
-- 看板 → 7 / 3 两列
-- 删除 → 10 条变 9 条且目标消失
-- 375px 视口：横向溢出 0，输入条贴底
+- 看板 → 按状态分列渲染
+- 设置抽屉 → 两个可带走项一行放下、无溢出
+- 删除 → 目标从数据源消失且总数 -1
+- 长标题（> 30 字）→ 换行不溢出、不与标签行重叠（量包围盒，不靠眼估）
+- 375px 视口：横向溢出 0
+- 链接即配置：三种输入形态 + 真导航后写盘并清 hash；错误态不谎报「已同步」
 - console 错误 0
 
-最近一次结果：`51/51`、`18/18`、UI 全项通过。
+最近一次结果：`55/55`、`18/18`、UI `21/21`（长标题 3 条已量）。
