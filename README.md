@@ -18,7 +18,7 @@
 ```bash
 npm run build     # → dist/index.html（约 69 KB）
 npm test          # 核心 55 项 + 三方合并 18 项
-npm run check:ui  # 可选：真实 Chrome 跑交互并出图，21 项断言，失败即退出码 1
+npm run check:ui  # 可选：真实 Chrome 跑交互并出图，26 项断言，失败即退出码 1
 ```
 
 不想用 npm 就直连脚本：`node build.mjs`、`node scripts/selftest.mjs`、`node scripts/check-ui.js`。

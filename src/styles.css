@@ -1,5 +1,9 @@
 /* ---------------------------------------------------------------- tokens */
-:root {
+/* 主题三态：auto（默认，跟随系统）/ light / dark —— 后两者由 <html data-theme> 显式指定。
+   浅色变量出现两处（显式浅色 + 系统浅色），check-ui.js 用 CSSOM 比对两处的变量名与值；
+   改色板必须两边一起改，否则那条断言会红。 */
+:root, :root[data-theme="dark"] {
+  color-scheme: dark;
   --bg: #0e1013;
   --surface: #16191f;
   --surface-2: #1c2027;
@@ -18,8 +22,27 @@
   --r-sm: 8px;
 }
 
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-2: #f0f2f5;
+  --line: #e2e6ec;
+  --line-strong: #c2cad6;
+  --line-soft: #eef1f5;
+  --text: #16191f;
+  --muted: #626a78;
+  --accent: #1f6feb;
+  --accent-soft: rgba(31, 111, 235, 0.1);
+  --ok: #1a7f37;
+  --warn: #9a6700;
+  --err: #cf222e;
+  --shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+}
+
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme]) {
+    color-scheme: light;
     --bg: #f5f6f8;
     --surface: #ffffff;
     --surface-2: #f0f2f5;
@@ -136,6 +159,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   transition: background 0.16s, color 0.16s;
 }
 .icon-btn:hover { background: var(--surface-2); color: var(--text); }
+/* 齿轮用 24 的 viewBox，全局 1.6 的线宽缩到 16 会偏细，这里补回来 */
+.ico-gear { stroke-width: 1.9; }
 .spin { animation: spin 0.9s linear infinite; transform-origin: center; }
 @keyframes spin { to { transform: rotate(360deg); } }
 

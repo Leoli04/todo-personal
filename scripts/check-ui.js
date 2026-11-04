@@ -40,7 +40,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const chrome = spawn(CHROME, args, { stdio: 'ignore' });
 
   let list = null;
-  for (let i = 0; i < 40; i++) {
+  // 冷启动可能要 20s 以上（首次解包 / 杀软扫描），给到 30s，别把偶发当失败
+  for (let i = 0; i < 75; i++) {
     await sleep(400);
     try { const j = JSON.parse(await get(`http://127.0.0.1:${PORT}/json/list`)); if (j.length) { list = j; break; } } catch (e) { /* retry */ }
   }
@@ -277,6 +278,62 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await ev(`document.querySelector('[data-act="drawer-close"]').click()`);
   await sleep(120);
 
+  // —— 7.5 主题三态：auto → light → dark → auto，且两处浅色变量必须一致
+  report.theme = await ev(`(() => {
+    const root = document.documentElement;
+    const bg = () => getComputedStyle(root).getPropertyValue('--bg').trim();
+    const click = () => document.querySelector('[data-act="theme"]').click();
+    const state = () => ({ attr: root.getAttribute('data-theme') || 'auto', bg: bg() });
+    const start = state();
+    click(); const s1 = state();
+    click(); const s2 = state();
+    click(); const s3 = state();
+    click(); // 停在 light，验证是否写盘
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem('todo-gh:config') || 'null'); } catch (e) {}
+    const persisted = saved && saved.theme;
+    click(); click(); // light → dark → auto，恢复跟随系统，避免影响后续截图
+    return { start, s1, s2, s3, persisted, restored: state() };
+  })()`);
+
+  report.palette = await ev(`(() => {
+    const flat = [];
+    const walk = (list) => { for (const r of list) { if (r.cssRules && r.cssRules.length) walk(r.cssRules); else flat.push(r); } };
+    walk(document.styleSheets[0].cssRules);
+    const norm = (s) => (s || '').replace(/\\s+/g, '');
+    const pick = (sel) => {
+      const r = flat.find((x) => x.selectorText && norm(x.selectorText) === norm(sel));
+      if (!r) return null;
+      const o = {};
+      for (const p of r.style) if (p.indexOf('--') === 0) o[p] = r.style.getPropertyValue(p).trim();
+      return o;
+    };
+    const explicit = pick(':root[data-theme="light"]');
+    const auto = pick(':root:not([data-theme])');
+    if (!explicit || !auto) return { missing: !explicit ? 'explicit-light-rule' : 'auto-light-rule' };
+    const keys = new Set([...Object.keys(explicit), ...Object.keys(auto)]);
+    const missing = [], mismatch = [];
+    for (const k of keys) {
+      if (!(k in explicit)) missing.push('explicit:' + k);
+      else if (!(k in auto)) missing.push('auto:' + k);
+      else if (explicit[k] !== auto[k]) mismatch.push(k + ' ' + explicit[k] + ' ≠ ' + auto[k]);
+    }
+    return { count: Object.keys(explicit).length, missing, mismatch };
+  })()`);
+
+  // 反向验证：系统是深色时，手动选浅色必须真的变浅（避免只有 auto 分支生效）
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+  await sleep(220);
+  report.themeInDarkSystem = await ev(`(() => {
+    const root = document.documentElement;
+    const bg = () => getComputedStyle(root).getPropertyValue('--bg').trim();
+    root.setAttribute('data-theme', 'light');
+    const light = bg();
+    root.removeAttribute('data-theme');
+    const autoDark = bg();
+    return { light, autoDark };
+  })()`);
+
   // —— 8. 删除（confirm 自动接受）
   report.remove = await ev(`(async () => {
     const S = window.__todo.S;
@@ -387,6 +444,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     R.drawer.open === true && R.drawer.linkCount === 2 && R.drawer.footOverflow === 0, R.drawer);
   check('删除：数据源同步移除', R.remove.gone === true && R.remove.after === R.remove.before - 1, R.remove);
   check('持久化：草稿与基线都落本地', R.persist.work === true && R.persist.base === true, R.persist);
+  check('主题：三态循环 auto→light→dark→auto',
+    R.theme.s1.attr === 'light' && R.theme.s2.attr === 'dark' && R.theme.s3.attr === 'auto', R.theme);
+  // 系统此时是浅色（auto 与 light 同值），所以只能断言「显式深色压过了系统浅色」
+  check('主题：显式深色覆盖系统浅色', R.theme.s1.attr === 'light' && R.theme.s2.attr === 'dark'
+    && R.theme.s1.bg !== R.theme.s2.bg, { light: R.theme.s1.bg, dark: R.theme.s2.bg });
+  check('主题：深色系统下选浅色同样生效',
+    R.themeInDarkSystem.light !== R.themeInDarkSystem.autoDark
+    && R.themeInDarkSystem.light === R.theme.s1.bg, R.themeInDarkSystem);
+  check('主题：写盘并恢复跟随系统',
+    R.theme.persisted === 'light' && R.theme.restored.attr === 'auto', R.theme);
+  check('主题：两处浅色色板完全一致',
+    (R.palette.count >= 14) && R.palette.missing.length === 0 && R.palette.mismatch.length === 0, R.palette);
   check('长标题：不溢出、不与元信息重叠', R.wrap.bad.length === 0, R.wrap);
   check('移动端 375：无横向溢出', R.mobile.hOverflow === 0, R.mobile);
   check('链接即配置：三种输入形态',

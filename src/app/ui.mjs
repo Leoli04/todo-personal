@@ -555,6 +555,38 @@ function drawerHTML() {
   </aside>`;
 }
 
+/* --------------------------------------------------------------- theme */
+
+const THEMES = [
+  { key: 'auto', label: '跟随系统' },
+  { key: 'light', label: '浅色' },
+  { key: 'dark', label: '深色' },
+];
+
+function themeLabel() {
+  return (THEMES.find((t) => t.key === S.cfg.theme) || THEMES[0]).label;
+}
+
+/** auto → 不写 data-theme（交给 prefers-color-scheme）；light/dark → 显式覆盖 */
+function applyTheme() {
+  const t = S.cfg.theme === 'light' || S.cfg.theme === 'dark' ? S.cfg.theme : '';
+  const root = document.documentElement;
+  if (t) root.setAttribute('data-theme', t);
+  else root.removeAttribute('data-theme');
+}
+
+function themeIcon() {
+  const t = S.cfg.theme;
+  if (t === 'light') {
+    return '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="3.1"/><path d="M8 1.3v1.9M8 12.8v1.9M1.3 8h1.9M12.8 8h1.9M3.2 3.2l1.35 1.35M11.45 11.45l1.35 1.35M12.8 3.2l-1.35 1.35M4.55 11.45L3.2 12.8"/></svg>';
+  }
+  if (t === 'dark') {
+    return '<svg viewBox="0 0 16 16"><path d="M13.6 9.7A5.9 5.9 0 0 1 6.3 2.4a5.9 5.9 0 1 0 7.3 7.3Z"/></svg>';
+  }
+  // auto：半明半暗，避免和“浅色”那个太阳混淆
+  return '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.4"/><path d="M8 2.6v10.8a5.4 5.4 0 0 0 0-10.8Z" fill="currentColor" stroke="none"/></svg>';
+}
+
 function render() {
   const app = $('#app');
   const tasks = visibleTasks();
@@ -572,11 +604,14 @@ function render() {
       </div>
       <div class="top-actions">
         <div class="chip ${isDemo ? 'chip--demo' : ''}">${chipStatus()}</div>
+        <button class="icon-btn" data-act="theme" aria-label="主题：${themeLabel()}" title="主题：${themeLabel()}（点击切换）">
+          ${themeIcon()}
+        </button>
         <button class="icon-btn" data-act="sync" aria-label="立即同步" title="立即同步">
           <svg viewBox="0 0 16 16" class="${st.phase === 'syncing' ? 'spin' : ''}"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5V5H11"/></svg>
         </button>
         <button class="icon-btn" data-act="drawer" aria-label="设置" title="设置">
-          <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4"/></svg>
+          <svg viewBox="0 0 24 24" class="ico-gear"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
         </button>
       </div>
     </header>
@@ -706,6 +741,15 @@ document.addEventListener('click', async (e) => {
     case 'merge':
       await mergeRemote();
       break;
+    case 'theme': {
+      const i = THEMES.findIndex((x) => x.key === (S.cfg.theme || 'auto'));
+      S.cfg.theme = THEMES[(i + 1) % THEMES.length].key;
+      applyTheme();
+      persistCfgOnly();
+      render();
+      toast(`主题：${themeLabel()}`, 'info', 1500);
+      break;
+    }
     case 'drawer':
       S.drawer = true;
       render();
@@ -844,6 +888,7 @@ document.addEventListener('submit', (e) => {
 
 loadLocal();
 const cfgedFromUrl = applyUrlCfg();
+applyTheme(); // 先落主题属性再渲染，避免浅色用户在深色底上闪一下
 rebuildEngine();
 render();
 if (cfgedFromUrl) toast('已按链接参数连接仓库', 'ok');
