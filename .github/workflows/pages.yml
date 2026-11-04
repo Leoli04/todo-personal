@@ -27,6 +27,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Pages 若尚未开启，尝试自动开启；失败不阻断构建（去 Settings → Pages 手动开即可）
+      - uses: actions/configure-pages@v5
+        continue-on-error: true
+        with:
+          enablement: true
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
